@@ -7,23 +7,52 @@ import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 
+/** Точка входа связывает консоль и хранилище; вся логика доступна для тестирования. */
 public final class CounterApp {
-    private CounterApp() {
-    }
+    private static final String USAGE = """
+            Использование: java -jar target/counter-su-1.0.0-SNAPSHOT.jar [файл]
+            По умолчанию: out.txt в текущем рабочем каталоге.
+            --help — показать эту справку.
+            """;
 
-    public static void main(String[] args) {
-        if (args.length > 1) {
-            System.err.println("Usage: java -jar counter-su.jar [counter-file]");
-            System.exit(2);
-        }
-        var path = Path.of(args.length == 0 ? "out.txt" : args[0]);
+    // Java 25 позволяет запускать обычный класс через нестатический main.
+    void main(String[] args) {
         var input = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
         var output = new PrintWriter(System.out, true, StandardCharsets.UTF_8);
+        var error = new PrintWriter(System.err, true, StandardCharsets.UTF_8);
+        int status = run(args, input, output, error);
+        if (status != 0) {
+            System.exit(status);
+        }
+    }
+
+    /** Возвращает код завершения, не закрывая общие потоки и не останавливая JVM. */
+    static int run(String[] args, BufferedReader input, PrintWriter output, PrintWriter error) {
+        if (args.length == 1 && "--help".equals(args[0])) {
+            output.print(USAGE);
+            return output.checkError() ? 1 : 0;
+        }
+        if (args.length > 1) {
+            error.print(USAGE);
+            error.flush();
+            return 2;
+        }
         try {
-            new CounterProcessor(new CounterStore(path), input, output).process();
+            var filename = args.length == 0 ? "out.txt" : args[0];
+            if (filename.isBlank()) {
+                throw new IllegalArgumentException("Путь к файлу не должен быть пустым.");
+            }
+            var store = new CounterStore(Path.of(filename));
+            new CounterProcessor(store, input, output).process();
+            return 0;
+        } catch (IllegalArgumentException exception) {
+            error.println("Некорректный путь: " + exception.getMessage());
+            error.flush();
+            return 2;
         } catch (IOException exception) {
-            System.err.println("Counter could not complete: " + exception.getMessage());
-            System.exit(1);
+            error.println("Ошибка счётчика: " + exception.getMessage());
+            error.flush();
+            return 1;
         }
     }
 }

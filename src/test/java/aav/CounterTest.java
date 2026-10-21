@@ -30,44 +30,44 @@ class CounterTest {
 
     @Test
     void missingAndEmptyFilesStartAtZero() throws IOException {
-        assertEquals(0, store().load());
+        assertEquals(0, store().load().value());
         Files.writeString(directory.resolve("out.txt"), "  ");
-        assertEquals(0, store().load());
+        assertEquals(0, store().load().value());
     }
 
     @Test
     void commandsPersistAndStopIgnoresRemainingInput() throws IOException {
         run("/inc\n/inc\n/stop\n/inc\n");
-        assertEquals(2, store().load());
+        assertEquals(2, store().load().value());
     }
 
     @Test
     void eofSavesWithoutCrashing() throws IOException {
         run("/inc\n");
-        assertEquals(1, store().load());
+        assertEquals(1, store().load().value());
     }
 
     @Test
     void resetIsPersistedAcrossSessions() throws IOException {
-        store().save(42);
+        store().save(new Counter(42));
         run("/reset\n/stop\n");
-        assertEquals(0, store().load());
+        assertEquals(0, store().load().value());
         run("/inc\n");
-        assertEquals(1, store().load());
+        assertEquals(1, store().load().value());
     }
 
     @Test
     void unknownCommandLeavesValueUnchanged() throws IOException {
-        store().save(3);
-        assertTrue(run("???\n").contains("Unknown command"));
-        assertEquals(3, store().load());
+        store().save(new Counter(3));
+        assertTrue(run("???\n").contains("Неизвестная команда"));
+        assertEquals(3, store().load().value());
     }
 
     @Test
     void overflowDoesNotWrapOrOverwrite() throws IOException {
-        store().save(Integer.MAX_VALUE);
-        assertTrue(run("/inc\n").contains("Maximum counter value"));
-        assertEquals(Integer.MAX_VALUE, store().load());
+        store().save(new Counter(Integer.MAX_VALUE));
+        assertTrue(run("/inc\n").contains("Достигнуто максимальное значение"));
+        assertEquals(Integer.MAX_VALUE, store().load().value());
     }
 
     @Test
@@ -82,23 +82,32 @@ class CounterTest {
     void whitespaceAndLegacyNegativeValuesAreSupported() throws IOException {
         Files.writeString(directory.resolve("out.txt"), " -2\n");
         run("  /inc  \n");
-        assertEquals(-1, store().load());
+        assertEquals(-1, store().load().value());
     }
 
     @Test
-    void countersDoNotShareStaticState() {
-        var first = new CounterHolder(0);
-        var second = new CounterHolder(0);
-        first.setValue(8);
-        assertEquals(0, second.getValue());
+    void incrementCreatesNewValue() {
+        var original = new Counter(8);
+        assertEquals(new Counter(9), original.increment());
+        assertEquals(8, original.value());
+        assertThrows(ArithmeticException.class, () -> new Counter(Integer.MAX_VALUE).increment());
+    }
+
+    @Test
+    void helpAndValueDoNotChangeCounter() throws IOException {
+        store().save(new Counter(7));
+        var output = run("/help\n/value\n/stop\n");
+        assertTrue(output.contains("Счётчик: 7"));
+        assertTrue(output.contains("/inc"));
+        assertEquals(7, store().load().value());
     }
 
     @Test
     void nestedDirectoryIsCreatedAndTemporaryFilesAreRemoved() throws IOException {
         var nested = new CounterStore(directory.resolve("nested/value.txt"));
-        nested.save(7);
-        nested.save(8);
-        assertEquals(8, nested.load());
+        nested.save(new Counter(7));
+        nested.save(new Counter(8));
+        assertEquals(8, nested.load().value());
         try (var files = Files.list(directory.resolve("nested"))) {
             assertEquals(1, files.count());
         }
