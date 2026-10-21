@@ -8,36 +8,43 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.Objects;
 
-/** UTF-8 integer file, compatible with the original out.txt format. */
-public final class CounterStore {
+/** Файловое хранилище UTF-8; сохраняет совместимость с прежним out.txt. */
+public final class CounterStore implements CounterRepository {
     private final Path path;
 
     public CounterStore(Path path) {
-        this.path = Objects.requireNonNull(path).toAbsolutePath();
+        this.path = Objects.requireNonNull(path, "path").toAbsolutePath();
+        if (this.path.getFileName() == null) {
+            throw new IllegalArgumentException("Укажите путь к файлу, а не корень диска.");
+        }
     }
 
-    public int load() throws IOException {
+    @Override
+    public Counter load() throws IOException {
         final String content;
         try {
             content = Files.readString(path).strip();
         } catch (NoSuchFileException ignored) {
-            return 0;
+            return Counter.ZERO;
         }
         if (content.isEmpty()) {
-            return 0;
+            return Counter.ZERO;
         }
         try {
-            return Integer.parseInt(content);
+            return new Counter(Integer.parseInt(content));
         } catch (NumberFormatException exception) {
-            throw new IOException("Invalid counter file: " + path, exception);
+            throw new IOException("Файл должен содержать целое число типа int: " + path, exception);
         }
     }
 
-    public void save(int value) throws IOException {
+    @Override
+    public void save(Counter counter) throws IOException {
+        Objects.requireNonNull(counter, "counter");
         Files.createDirectories(path.getParent());
         var temporary = Files.createTempFile(path.getParent(), ".counter-", ".tmp");
         try {
-            Files.writeString(temporary, Integer.toString(value));
+            Files.writeString(temporary, Integer.toString(counter.value()));
+            // Временный файл рядом с основным позволяет выполнить атомарную замену.
             try {
                 Files.move(temporary, path, StandardCopyOption.ATOMIC_MOVE,
                         StandardCopyOption.REPLACE_EXISTING);

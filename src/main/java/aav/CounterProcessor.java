@@ -5,54 +5,82 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.util.Objects;
 
-/** Input/output are injected so commands can be tested without System.in. */
+/** Одна консольная сессия. Переданные потоки принадлежат вызывающему коду. */
 public final class CounterProcessor {
-    private final CounterStore store;
+    private static final String HELP = """
+            Команды:
+              /inc   — увеличить на 1
+              /reset — сбросить в 0
+              /value — показать значение
+              /help  — показать справку
+              /stop  — сохранить и выйти
+            """;
+
+    private final CounterRepository repository;
     private final BufferedReader input;
     private final PrintWriter output;
 
-    public CounterProcessor(CounterStore store, BufferedReader input, PrintWriter output) {
-        this.store = Objects.requireNonNull(store);
-        this.input = Objects.requireNonNull(input);
-        this.output = Objects.requireNonNull(output);
+    public CounterProcessor(CounterRepository repository, BufferedReader input, PrintWriter output) {
+        this.repository = Objects.requireNonNull(repository, "repository");
+        this.input = Objects.requireNonNull(input, "input");
+        this.output = Objects.requireNonNull(output, "output");
     }
 
     public void process() throws IOException {
-        var counter = new CounterHolder(store.load());
-        output.printf("Counter: %d. Commands: /inc, /reset, /stop%n", counter.getValue());
-        output.flush();
+        var counter = repository.load();
+        printValue(counter);
+        output.print(HELP);
+        flushOutput();
+
         String line;
         while ((line = input.readLine()) != null) {
-            switch (line.strip()) {
-                case "/inc" -> {
-                    try {
-                        update(counter, Math.incrementExact(counter.getValue()));
-                    } catch (ArithmeticException ignored) {
-                        output.println("Maximum counter value reached. Use /reset.");
+            switch (Command.parse(line)) {
+                case INCREMENT -> {
+                    if (counter.value() == Integer.MAX_VALUE) {
+                        output.println("Достигнуто максимальное значение. Используйте /reset.");
+                    } else {
+                        counter = save(counter.increment());
+                        printValue(counter);
                     }
                 }
-                case "/reset" -> update(counter, 0);
-                case "/stop" -> {
+                case RESET -> {
+                    counter = save(Counter.ZERO);
+                    printValue(counter);
+                }
+                case VALUE -> printValue(counter);
+                case HELP -> output.print(HELP);
+                case STOP -> {
                     finish(counter);
                     return;
                 }
-                default -> output.println("Unknown command. Use /inc, /reset or /stop.");
+                case UNKNOWN -> output.println("Неизвестная команда. Введите /help.");
             }
-            output.flush();
+            flushOutput();
         }
+        // Конец ввода (Ctrl+D на macOS) завершает сессию так же, как /stop.
         finish(counter);
     }
 
-    private void update(CounterHolder counter, int newValue) throws IOException {
-        // Publish the new in-memory value only after persistence succeeds.
-        store.save(newValue);
-        counter.setValue(newValue);
-        output.printf("Counter: %d%n", newValue);
+    private Counter save(Counter counter) throws IOException {
+        // Сначала сохраняем: при ошибке записи новое значение не объявляется успешным.
+        repository.save(counter);
+        return counter;
     }
 
-    private void finish(CounterHolder counter) throws IOException {
-        store.save(counter.getValue());
-        output.printf("Saved. Final counter: %d%n", counter.getValue());
-        output.flush();
+    private void finish(Counter counter) throws IOException {
+        save(counter);
+        output.printf("Сохранено. Итоговое значение: %d%n", counter.value());
+        flushOutput();
+    }
+
+    private void printValue(Counter counter) {
+        output.printf("Счётчик: %d%n", counter.value());
+    }
+
+    private void flushOutput() throws IOException {
+        // PrintWriter сам подавляет IOException; checkError также сбрасывает буфер.
+        if (output.checkError()) {
+            throw new IOException("Не удалось вывести результат в консоль.");
+        }
     }
 }

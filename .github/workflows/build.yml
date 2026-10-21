@@ -14,6 +14,17 @@ jobs:
           java-version: '25'
           cache: maven
       - run: ./mvnw --batch-mode --no-transfer-progress clean verify
+      - name: Smoke test packaged application
+        shell: bash
+        run: |
+          state_dir=$(mktemp -d)
+          trap 'rm -rf "$state_dir"' EXIT
+          jar=target/counter-su-1.0.0-SNAPSHOT.jar
+          printf '/inc\n/inc\n/stop\n' | java -jar "$jar" "$state_dir/counter.txt"
+          test "$(cat "$state_dir/counter.txt")" = 2
+          printf '/inc\n' | java -jar "$jar" "$state_dir/counter.txt"
+          test "$(cat "$state_dir/counter.txt")" = 3
+          java -jar "$jar" --help
       - uses: actions/upload-artifact@v4
         if: always()
         with:
